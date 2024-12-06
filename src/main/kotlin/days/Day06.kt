@@ -7,25 +7,11 @@ import days.Direction.DOWN
 import days.Direction.LEFT
 import days.Direction.RIGHT
 import days.Direction.UP
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.flatMapMerge
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.job
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.io.File
-import java.util.concurrent.atomic.AtomicInteger
-import kotlin.coroutines.coroutineContext
-import kotlin.random.Random
 import kotlin.time.measureTime
 
 val game = File("src/main/resources/inputs/day06.txt").createBoard()
@@ -34,31 +20,31 @@ val game = File("src/main/resources/inputs/day06.txt").createBoard()
 suspend fun main() = coroutineScope {
     val (startBoard, startGuard) = game
 
+    game.toGameState().apply {
+        playThrough()
+        guard.getUniquePlaces().println()
+    }
+
     measureTime {
-        val jobList = createJobList(startBoard, startGuard)
-        jobList.withIndex()
-            .map { job -> async { runRound(job.value.board, job.value.guard) } }
+        createAllVariations(startBoard, startGuard)
+            .map { async { it.playThrough() } }
             .awaitAll()
             .count { result -> result == LOOP }
             .println()
     }.println()
-
 }
 
-private fun createJobList(startBoard: Board, startGuard: Guard): List<BoardJob> {
-    val l = mutableListOf<BoardJob>()
+private fun createAllVariations(startBoard: Board, startGuard: Guard): List<GameState> {
+    val jobQueue = mutableListOf<GameState>()
     repeat(startBoard.height) { y ->
         repeat(startBoard.width) { x ->
-            val (board, guard) = startBoard.copy() to startGuard.copy()
-            board.obstacle = board.obstacle.map { it.copy() }
-            board.addObstacle(x, y)
-            l.add(BoardJob(board = board, guard = guard))
+            jobQueue.add((startBoard to startGuard).toGameState(Obstacle(x, y)))
         }
     }
-    return l
+    return jobQueue
 }
 
-private fun runRound(board: Board, guard: Guard): ActionResult {
+private fun GameState.playThrough(): ActionResult {
     var next = guard.next(board)
     while (next == ActionResult.CONTINUE) {
         next = guard.next(board)
@@ -81,18 +67,23 @@ data class Board(
         return obstacle.find { obstacle -> obstacle.x == x && obstacle.y == y }
     }
 
-    fun addObstacle(x: Int, y: Int) {
-        additionalObstacle = Obstacle(x = x, y = y)
-    }
-
     fun isOutOfBound(x: Int, y: Int) = (x < 0 || y < 0 || x >= width || y >= height)
+
+    fun deepCopy(adObstacle: Obstacle?): Board {
+        val c = this.copy()
+        c.obstacle = obstacle.map { it.copy() }
+        c.additionalObstacle = adObstacle?.copy()
+        return c
+    }
 }
 
-data class BoardJob(
+data class GameState(
     val board: Board,
     val guard: Guard,
-) {
+)
 
+fun Pair<Board, Guard>.toGameState(additionalObstacle: Obstacle? = null): GameState {
+    return GameState(board = first.deepCopy(additionalObstacle), guard = second.copy())
 }
 
 data class Obstacle(
@@ -112,7 +103,6 @@ data class Guard(
     }
 
     fun next(board: Board): ActionResult {
-        var turns = 0
         do {
             var (action, nextDirection) = when (direction) {
                 UP -> board.get(x, y - 1).let { if (it == null) WALK to UP else TURN to RIGHT }
@@ -121,11 +111,7 @@ data class Guard(
                 RIGHT -> board.get(x + 1, y).let { if (it == null) WALK to RIGHT else TURN to DOWN }
             }
             direction = nextDirection
-            if (action == TURN)
-                turns++
-        } while (action == TURN && turns <= 4)
-        if (turns == 4)
-            return ActionResult.LOOP_2
+        } while (action == TURN)
 
         when (direction) {
             UP -> y -= 1
@@ -141,6 +127,7 @@ data class Guard(
         return board.isOutOfBound(x, y)
             .also { oob -> if (!oob) pushHistory() }
             .let { oob -> if (oob) ActionResult.OUT_OF_BOUND else ActionResult.CONTINUE }
+            .also { result -> if (result == ActionResult.OUT_OF_BOUND) history.size }
     }
 
     fun getUniquePlaces(): Int {
@@ -168,7 +155,7 @@ enum class Action {
 }
 
 enum class ActionResult {
-    OUT_OF_BOUND, LOOP, CONTINUE, LOOP_2
+    OUT_OF_BOUND, LOOP, CONTINUE
 }
 
 data class GuardHistory(
