@@ -18,27 +18,28 @@ val game = File("src/main/resources/inputs/day06.txt").createBoard()
 
 @OptIn(ExperimentalCoroutinesApi::class)
 suspend fun main() = coroutineScope {
-    val (startBoard, startGuard) = game
-
+    // Task 1
     game.toGameState().apply {
         playThrough()
         guard.getUniquePlaces().println()
     }
 
-    measureTime {
-        createAllVariations(startBoard, startGuard)
-            .map { async { it.playThrough() } }
-            .awaitAll()
-            .count { result -> result == LOOP }
-            .println()
-    }.println()
+    // Task 2
+    game.generateGameStateVariations()
+        .map { async { it.playThrough() } }
+        .awaitAll()
+        .count { result -> result == LOOP }
+        .println()
 }
 
-private fun createAllVariations(startBoard: Board, startGuard: Guard): List<GameState> {
+private fun Pair<Board, Guard>.generateGameStateVariations(): List<GameState> {
+    val startBoard = this.first.deepCopy()
+    val startGuard = this.second.copy()
     val jobQueue = mutableListOf<GameState>()
     repeat(startBoard.height) { y ->
         repeat(startBoard.width) { x ->
-            jobQueue.add((startBoard to startGuard).toGameState(Obstacle(x, y)))
+            if (startBoard.getObstacle(x, y) == null)
+                jobQueue.add((startBoard to startGuard).toGameState(Obstacle(x, y)))
         }
     }
     return jobQueue
@@ -59,7 +60,7 @@ data class Board(
 ) {
     var additionalObstacle: Obstacle? = null
 
-    fun get(x: Int, y: Int): Obstacle? {
+    fun getObstacle(x: Int, y: Int): Obstacle? {
         additionalObstacle?.let {
             if (it.x == x && it.y == y)
                 return it
@@ -69,7 +70,7 @@ data class Board(
 
     fun isOutOfBound(x: Int, y: Int) = (x < 0 || y < 0 || x >= width || y >= height)
 
-    fun deepCopy(adObstacle: Obstacle?): Board {
+    fun deepCopy(adObstacle: Obstacle? = null): Board {
         val c = this.copy()
         c.obstacle = obstacle.map { it.copy() }
         c.additionalObstacle = adObstacle?.copy()
@@ -105,10 +106,10 @@ data class Guard(
     fun next(board: Board): ActionResult {
         do {
             var (action, nextDirection) = when (direction) {
-                UP -> board.get(x, y - 1).let { if (it == null) WALK to UP else TURN to RIGHT }
-                DOWN -> board.get(x, y + 1).let { if (it == null) WALK to DOWN else TURN to LEFT }
-                LEFT -> board.get(x - 1, y).let { if (it == null) WALK to LEFT else TURN to UP }
-                RIGHT -> board.get(x + 1, y).let { if (it == null) WALK to RIGHT else TURN to DOWN }
+                UP -> board.getObstacle(x, y - 1).let { if (it == null) WALK to UP else TURN to RIGHT }
+                DOWN -> board.getObstacle(x, y + 1).let { if (it == null) WALK to DOWN else TURN to LEFT }
+                LEFT -> board.getObstacle(x - 1, y).let { if (it == null) WALK to LEFT else TURN to UP }
+                RIGHT -> board.getObstacle(x + 1, y).let { if (it == null) WALK to RIGHT else TURN to DOWN }
             }
             direction = nextDirection
         } while (action == TURN)
